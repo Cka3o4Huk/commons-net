@@ -22,6 +22,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.Inet6Address;
@@ -293,6 +294,12 @@ implements Configurable
     public static final String FTP_SYSTEM_TYPE_DEFAULT = "org.apache.commons.net.ftp.systemType.default";
 
     /**
+     * The system property ({@value}) which can be used to override timeout for data connection acceptance.<br/>
+     * By default, timeout is 3 seconds
+     */
+    public static final String FTP_DATACONNECTION_TIMEOUT = "org.apache.commons.net.ftp.dataconnection.timeout";
+    
+    /**
      * The name of an optional systemType properties file ({@value}), which is loaded
      * using {@link Class#getResourceAsStream(String)}.<br/>
      * The entries are the systemType (as determined by {@link FTPClient#getSystemType})
@@ -341,6 +348,7 @@ implements Configurable
 
     private int __dataConnectionMode;
     private int __dataTimeout;
+    private int __dataAcceptTimeout; 
     private int __passivePort;
     private String __passiveHost;
     private final Random __random;
@@ -458,6 +466,7 @@ implements Configurable
     {
         __initDefaults();
         __dataTimeout = -1;
+        __dataAcceptTimeout = -1;
         __remoteVerificationEnabled = true;
         __parserFactory = new DefaultFTPFileEntryParserFactory();
         __configuration      = null;
@@ -789,61 +798,78 @@ implements Configurable
         final boolean isInet6Address = getRemoteAddress() instanceof Inet6Address;
 
         Socket socket;
+        int retryCount = 3;
 
         if (__dataConnectionMode == ACTIVE_LOCAL_DATA_CONNECTION_MODE)
         {
-            // if no activePortRange was set (correctly) -> getActivePort() = 0
-            // -> new ServerSocket(0) -> bind to any free local port
-            ServerSocket server = _serverSocketFactory_.createServerSocket(getActivePort(), 1, getHostAddress());
-
-            try {
-                // Try EPRT only if remote server is over IPv6, if not use PORT,
-                // because EPRT has no advantage over PORT on IPv4.
-                // It could even have the disadvantage,
-                // that EPRT will make the data connection fail, because
-                // today's intelligent NAT Firewalls are able to
-                // substitute IP addresses in the PORT command,
-                // but might not be able to recognize the EPRT command.
-                if (isInet6Address) {
-                    if (!FTPReply.isPositiveCompletion(eprt(getReportHostAddress(), server.getLocalPort()))) {
-                        return null;
-                    }
-                } else {
-                    if (!FTPReply.isPositiveCompletion(port(getReportHostAddress(), server.getLocalPort()))) {
-                        return null;
-                    }
-                }
-
-                if ((__restartOffset > 0) && !restart(__restartOffset)) {
-                    return null;
-                }
-
-                if (!FTPReply.isPositivePreliminary(sendCommand(command, arg))) {
-                    return null;
-                }
-
-                // For now, let's just use the data timeout value for waiting for
-                // the data connection.  It may be desirable to let this be a
-                // separately configurable value.  In any case, we really want
-                // to allow preventing the accept from blocking indefinitely.
-                if (__dataTimeout >= 0) {
-                    server.setSoTimeout(__dataTimeout);
-                }
-                socket = server.accept();
-
-                // Ensure the timeout is set before any commands are issued on the new socket
-                if (__dataTimeout >= 0) {
-                    socket.setSoTimeout(__dataTimeout);
-                }
-                if (__receiveDataSocketBufferSize > 0) {
-                    socket.setReceiveBufferSize(__receiveDataSocketBufferSize);
-                }
-                if (__sendDataSocketBufferSize > 0) {
-                    socket.setSendBufferSize(__sendDataSocketBufferSize);
-                }
-            } finally {
-                server.close();
-            }
+        	do
+        	{
+	            // if no activePortRange was set (correctly) -> getActivePort() = 0
+	            // -> new ServerSocket(0) -> bind to any free local port
+	            ServerSocket server = _serverSocketFactory_.createServerSocket(getActivePort(), 1, getHostAddress());
+	
+	            try {
+	                // Try EPRT only if remote server is over IPv6, if not use PORT,
+	                // because EPRT has no advantage over PORT on IPv4.
+	                // It could even have the disadvantage,
+	                // that EPRT will make the data connection fail, because
+	                // today's intelligent NAT Firewalls are able to
+	                // substitute IP addresses in the PORT command,
+	                // but might not be able to recognize the EPRT command.
+	                if (isInet6Address) {
+	                    if (!FTPReply.isPositiveCompletion(eprt(getReportHostAddress(), server.getLocalPort()))) {
+	                        return null;
+	                    }
+	                } else {
+	                    if (!FTPReply.isPositiveCompletion(port(getReportHostAddress(), server.getLocalPort()))) {
+	                        return null;
+	                    }
+	                }
+	
+	                if ((__restartOffset > 0) && !restart(__restartOffset)) {
+	                    return null;
+	                }
+	
+	                if (!FTPReply.isPositivePreliminary(sendCommand(command, arg))) {
+	                    return null;
+	                }
+	
+	                // For now, let's just use the data timeout value for waiting for
+	                // the data connection.  It may be desirable to let this be a
+	                // separately configurable value.  In any case, we really want
+	                // to allow preventing the accept from blocking indefinitely.
+	                if (__dataTimeout >= 0) {
+	                    server.setSoTimeout(__dataTimeout);
+	                } else {
+	                	if (__dataAcceptTimeout == -1) {
+	                		// Initialize timeout for data connection acceptance.
+	                		String strTimeout = System.getProperty(FTP_DATACONNECTION_TIMEOUT, "3");
+	                		try {
+	                			__dataAcceptTimeout = Integer.parseInt(strTimeout);
+	                		} catch (NumberFormatException e) {
+	                			__dataAcceptTimeout = Integer.MIN_VALUE;
+	                		}
+	                	}
+	                    if(__dataAcceptTimeout >= 0)
+	                    	server.setSoTimeout(__dataAcceptTimeout);
+	                }
+	                socket = server.accept();
+	
+	                // Ensure the timeout is set before any commands are issued on the new socket
+	                if (__dataTimeout >= 0) {
+	                    socket.setSoTimeout(__dataTimeout);
+	                }
+	                if (__receiveDataSocketBufferSize > 0) {
+	                    socket.setReceiveBufferSize(__receiveDataSocketBufferSize);
+	                }
+	                if (__sendDataSocketBufferSize > 0) {
+	                    socket.setSendBufferSize(__sendDataSocketBufferSize);
+	                }
+	            } finally {
+	                server.close();
+	            }
+        	}
+            while (socket == null && retryCount-- > 0);
         }
         else
         { // We must be in PASSIVE_LOCAL_DATA_CONNECTION_MODE
