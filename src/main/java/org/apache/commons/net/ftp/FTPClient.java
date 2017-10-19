@@ -797,8 +797,8 @@ implements Configurable
 
         final boolean isInet6Address = getRemoteAddress() instanceof Inet6Address;
 
-        Socket socket;
-        int retryCount = 3;
+        Socket socket = null;
+        int retryCount = 7;
 
         if (__dataConnectionMode == ACTIVE_LOCAL_DATA_CONNECTION_MODE)
         {
@@ -843,7 +843,7 @@ implements Configurable
 	                } else {
 	                	if (__dataAcceptTimeout == -1) {
 	                		// Initialize timeout for data connection acceptance.
-	                		String strTimeout = System.getProperty(FTP_DATACONNECTION_TIMEOUT, "3");
+                            String strTimeout = System.getProperty(FTP_DATACONNECTION_TIMEOUT, "3000");
 	                		try {
 	                			__dataAcceptTimeout = Integer.parseInt(strTimeout);
 	                		} catch (NumberFormatException e) {
@@ -865,11 +865,18 @@ implements Configurable
 	                if (__sendDataSocketBufferSize > 0) {
 	                    socket.setSendBufferSize(__sendDataSocketBufferSize);
 	                }
+	            } catch (SocketTimeoutException e) {
+                    socket = null;
+                    /* get negative reply */
+                    getReply();
+                    if (retryCount == 0)
+                        throw e;
 	            } finally {
 	                server.close();
+	                retryCount--;
 	            }
         	}
-            while (socket == null && retryCount-- > 0);
+            while ((socket == null) && (retryCount > 0));
         }
         else
         { // We must be in PASSIVE_LOCAL_DATA_CONNECTION_MODE
