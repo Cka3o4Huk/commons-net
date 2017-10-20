@@ -869,7 +869,7 @@ implements Configurable
                     socket = null;
                     /* get negative reply */
                     getReply();
-                    if (retryCount == 0)
+                    if (retryCount <= 1)
                         throw e;
 	            } finally {
 	                server.close();
